@@ -3,10 +3,15 @@
 SoftwareSerial BTSerial(7, 8); // CONNECT BT RXD PIN TO ARDUINO 8 PIN | CONNECT BT TXN PIN TO ARDUINO 7 PIN
 
 bool lower = false;
+
 long joysticktimer;
+long printTimer = 0;
 
 int leftspeed = 0;
 int rightspeed = 0;
+
+int angle = 0;
+int strength = 0;
 
 
 void setup()
@@ -24,83 +29,108 @@ void setup()
 
   BTSerial.begin(9600);  // HC-05 default speed in AT command more
   joysticktimer = millis();
+  printTimer = millis();
 
   delay(200);
 
 }
 
 void loop()
-{ 
+{
   if (BTSerial.available() > 0)
   {
     joysticktimer = millis();
     String val =
       BTSerial.readStringUntil('#');
     if ((val.length() == 7) && (isValidNumber(val))) {
-      int angle = val.substring(0, 3).toInt();
-      int strength = val.substring(3, 6).toInt();
+      //reads angle and strength and smooths tem since the values highly fluctuate
+      angle = (int)(angle * 0.9 +  val.substring(0, 3).toInt() * 0.1);
+      strength = (int)(strength * 0.9 + val.substring(3, 6).toInt() * 0.1);
       byte button = val.substring(6, 8).toInt();
 
 
-      handlejoystick(angle, strength);
+      handlejoystick();
     }
     Serial.flush();
   }
   if ((millis() - joysticktimer) > 300) {
-      Serial.println("HERE");
-      handlejoystick(0, 0);
-    }
-    delay(100);
+
+    //stops the servos if no user input was given in a short amount of time
+    angle = 0;
+    strength = 0;
+    handlejoystick();
+  }
+
+  if (millis() - printTimer > 1000) {
+
+    Serial.println("Speed L: " + (String)leftspeed + "; R: " + (String)rightspeed);
+    /*Serial.print("button:  ");
+      Serial.println(intbutton);*/
+
+  }
 }
 
-void handlejoystick(int angle, int strength) {
+void handlejoystick(void) {
+  //if it should stop just skip all the calculating and stop imidiently
+  if (strength <= 0) {
+    leftspeed = 0;
+    rightspeed = 0;
+    analogWrite(3, abs(0));
+    analogWrite(6, abs(0));
 
-  // pin 3 und 5 sind für den linken Motor, wobei 3 die Geschwindigkeit bestimmt und 5 die Richtung
-  // pin 6 und 9 sind für den rechten Motor, wobei 6 die Geschwindigkeit bestimmt und 9 die Richtung
-  // obere Hälfte oder untere Hälfte
-  if (angle >= 180)lower = HIGH;
-  else lower = LOW;
+    return;
+  }
+
+  // pin 3 and 5 are the left servo, where 3 is the velocity and 5 the direction
+  // pin 6 and 9 are the left servo, where 3 is the velocity and 5 the direction
+  // upper / lower half
+  if (angle >= 180)lower = true;
+  else lower = false;
   float cosinus;
 
   // zunächst die rechten beiden Quadranten
   if (angle <= 90 || angle >= 270) {
-    leftspeed = (int)(leftspeed * 0.9 + strength * 2.55 * 0.1);
+    leftspeed = strength;
 
     cosinus = cos(2 * angle * PI / 180);
-    // Wenn der cosinusterm größer null ist, die Richtung für rechts auf rückwärts
-    // also kleiner als 45° oder größer als 315°
-    rightspeed = (int)(rightspeed *0.9 + (strength * 2.55) * (-cosinus) * 0.1);
+    // if cosinus greater then zero, the right servo turns backwarts
+    // i. e. smaler then 45° or greater then 315°
+    rightspeed = (int)(strength * (-cosinus));
 
 
   } else {
-
-    rightspeed = (int)(rightspeed *0.9 + (strength * 2.55) *0.1);
+    rightspeed = strength;
 
     cosinus = cos(2 * angle * PI / 180);
-    // Wenn der cosinusterm größer null ist, die Richtung für links auf rückwärts
+    // if the cosinus is greater then zero, the left servo turns backwarts
 
-    leftspeed = (int)(leftspeed * 0.9 + (strength * 2.0) * (-cosinus) * 0.1);
+    leftspeed = (int)(strength * (-cosinus));
   }
   if (lower) {
     leftspeed = -leftspeed;
     rightspeed = -rightspeed;
   }
-  // Schreiben der Stati und Geschwindigkeiten
+  // writing of velocity and direction
   if (leftspeed < 0) digitalWrite(5, HIGH);
   else digitalWrite(5, LOW);
 
   if (rightspeed < 0) digitalWrite(9, HIGH);
   else digitalWrite(9, LOW);
 
+
+  leftspeed = sign(leftspeed) * map(abs(leftspeed) * 10, 0, 1000, 56, 100);
+  rightspeed = sign (rightspeed) * map(abs(rightspeed) * 10, 0, 1000, 126, 200);
+
   analogWrite(3, abs(leftspeed));
   analogWrite(6, abs(rightspeed));
 
-
-  Serial.println("Speed L: " + (String)leftspeed + "; R: " + (String)rightspeed);
-  /*Serial.print("button:  ");
-  Serial.println(intbutton);*/
-
 }
+
+//returns signum of int num
+int sign(int num) {
+  if (signbit(num)) return -1;
+  else return 1;
+  }
 
 //returns only true if every char in String is a digit
 boolean isValidNumber(String str) {
